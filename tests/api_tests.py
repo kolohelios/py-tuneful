@@ -4,7 +4,7 @@ import shutil
 import json
 try: from urllib.parse import urlparse
 except ImportError: from urlparse import urlparse # Py2 compatibility
-from io import StringIO
+from io import StringIO, BytesIO
 
 import sys; print(list(sys.modules.keys()))
 # Configure our app to use the testing databse
@@ -62,8 +62,8 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(data, [])
         
     def test_get_songs(self):
-        fileA = models.File(name = 'Test Song A.mp3')
-        fileB = models.File(name = 'Test Song B.mp3')
+        fileA = models.File(filename = 'Test Song A.mp3')
+        fileB = models.File(filename = 'Test Song B.mp3')
         songA = models.Song(file = fileA)
         songB = models.Song(file = fileB)
         session.add_all([fileA, fileB, songA, songB])
@@ -94,8 +94,8 @@ class TestAPI(unittest.TestCase):
         the one that we requested and not a different one 
         from the DB '''
         
-        fileA = models.File(name = 'Test Song A.mp3')
-        fileB = models.File(name = 'Test Song B.mp3')
+        fileA = models.File(filename = 'Test Song A.mp3')
+        fileB = models.File(filename = 'Test Song B.mp3')
         songA = models.Song(file = fileA)
         songB = models.Song(file = fileB)
         session.add_all([fileA, fileB, songA, songB])
@@ -121,7 +121,7 @@ class TestAPI(unittest.TestCase):
         
     def test_post_song(self):
         ''' posting a new song '''
-        file = models.File(name = 'Test Song.mp3')
+        file = models.File(filename = 'Test Song.mp3')
         session.add(file)
         session.commit()
         
@@ -154,7 +154,7 @@ class TestAPI(unittest.TestCase):
         
         self.assertEqual(song.id, 1)
         self.assertEqual(song.file.id, 1)
-        self.assertEqual(song.file.name, 'Test Song.mp3')
+        self.assertEqual(song.file.filename, 'Test Song.mp3')
         
     def test_post_with_unsupported_accept_header(self):
         response = self.client.post('/api/songs',
@@ -252,8 +252,8 @@ class TestAPI(unittest.TestCase):
     def test_put_song(self):
         ''' updating a song '''
         
-        fileA = models.File(name = 'Test Song A.mp3')
-        fileB = models.File(name = 'Test Song B.mp3')
+        fileA = models.File(filename = 'Test Song A.mp3')
+        fileB = models.File(filename = 'Test Song B.mp3')
         song = models.Song(file = fileA)
         session.add_all([fileA, fileB, song])
         session.commit()
@@ -287,13 +287,13 @@ class TestAPI(unittest.TestCase):
         
         self.assertEqual(song.id, 1)
         self.assertEqual(song.file.id, 2)
-        self.assertEqual(song.file.name, 'Test Song B.mp3')
+        self.assertEqual(song.file.filename, 'Test Song B.mp3')
         
     def test_put_song_with_nonexistent_id(self):
         ''' updating a song '''
         
-        fileA = models.File(name = 'Test Song A.mp3')
-        fileB = models.File(name = 'Test Song B.mp3')
+        fileA = models.File(filename = 'Test Song A.mp3')
+        fileB = models.File(filename = 'Test Song B.mp3')
         song = models.Song(file = fileA)
         session.add_all([fileA, fileB, song])
         session.commit()
@@ -332,7 +332,7 @@ class TestAPI(unittest.TestCase):
     def test_put_song_with_nonexistent_file(self):
         ''' updating a song '''
         
-        file = models.File(name = 'Test Song A.mp3')
+        file = models.File(filename = 'Test Song A.mp3')
         song = models.Song(file = file)
         session.add_all([file, song])
         session.commit()
@@ -375,7 +375,7 @@ class TestAPI(unittest.TestCase):
         ''' try putting a song with a file that 
         has an id of the wrong type '''
         
-        file = models.File(name = 'Test Song A.mp3')
+        file = models.File(filename = 'Test Song A.mp3')
         song = models.Song(file = file)
         session.add_all([file, song])
         session.commit()
@@ -403,7 +403,7 @@ class TestAPI(unittest.TestCase):
         ''' try putting a song with a file that 
         has only a key:value pair insted of a file object '''
         
-        file = models.File(name = 'Test Song A.mp3')
+        file = models.File(filename = 'Test Song A.mp3')
         song = models.Song(file = file)
         session.add_all([file, song])
         session.commit()
@@ -428,7 +428,7 @@ class TestAPI(unittest.TestCase):
     def test_delete_song(self):
         ''' delete a song '''
         
-        file = models.File(name = 'Test Song A.mp3')
+        file = models.File(filename = 'Test Song A.mp3')
         song = models.Song(file = file)
         session.add_all([file, song])
         session.commit()
@@ -469,3 +469,37 @@ class TestAPI(unittest.TestCase):
         data = json.loads(response.data.decode('ascii'))
         self.assertEqual(data['message'],
             'Request must accept application/json data')
+            
+    def test_get_uploaded_file(self):
+        path = upload_path('test.txt')
+        with open(path, 'wb') as f:
+            f.write(b'File contents')
+        
+        response = self.client.get('/uploads/test.txt')
+        
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, 'text/plain')
+        self.assertEqual(response.data, b'File contents')
+        
+    def test_file_upload(self):
+        data = {
+            'file': (BytesIO(b'File contents'), 'test.txt')
+        }
+        
+        response = self.client.post('/api/files',
+            data = data,
+            content_type = 'multipart/form-data',
+            headers = [('Accept', 'application/json')]
+        )
+        
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.mimetype, 'application/json')
+        
+        data = json.loads(response.data.decode('ascii'))
+        self.assertEqual(urlparse(data['path']).path, '/uploads/test.txt')
+
+        path = upload_path('test.txt')
+        self.assertTrue(os.path.isfile(path))
+        with open(path, 'rb') as f:
+            contents = f.read()
+        self.assertEqual(contents, b'File contents')
